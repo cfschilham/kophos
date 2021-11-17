@@ -4,4 +4,6 @@ type Wallet struct {
 
 }
 
-func New()
+func New() Wallet {
+	
+}

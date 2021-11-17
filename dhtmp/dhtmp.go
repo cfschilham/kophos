@@ -1,7 +1,6 @@
 package dhtmp
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -63,28 +62,50 @@ func addOverflow(x, y uint32) uint32 {
 	return x + y
 }
 
+func leftRotate(x, n uint32) uint32 {
+	n %= 32
+	return x << n | x >> (32-n)
+}
+
+func rightRotate(x, n uint32) uint32 {
+	n %= 32
+	return x >> n | x << (32-n)
+}
+
 func Sum(data []byte) [32]byte {
 	chunks := chunkify(data)
-	//h0, h1, h2, h3, h4, h5, h6, h7 := h0d, h1d, h2d, h3d, h4d, h5d, h6d, h7d
-	//for _, chunk := range chunks {
-	//	a, b, c, d, e, f, g, h := h0, h1, h2, h3, h4, h5, h6, h7
-	//
-	//
-	//
-	//	h0, h1, h2, h3 = addOverflow(h0, a), addOverflow(h1, b), addOverflow(h2, c), addOverflow(h3, d)
-	//	h4, h5, h6, h7 = addOverflow(h4, e), addOverflow(h5, f), addOverflow(h6, g), addOverflow(h7, h)
-	//}
+	h0, h1, h2, h3, h4, h5, h6, h7 := h0d, h1d, h2d, h3d, h4d, h5d, h6d, h7d
+	for _, chunk := range chunks {
+		a, b, c, d, e, f, g, h := h0, h1, h2, h3, h4, h5, h6, h7
 
-	for i, d := range data {
-		fmt.Printf("%d: %08b ", i, d)
-	}
-	fmt.Printf("\n")
-	for i, chunk := range chunks {
-		fmt.Printf("chunk %02d:\n", i)
-		for j, n := range chunk {
-			fmt.Printf("%03d: %032b\n", j, n)
+		for i := 0; i < 128; i++ {
+			for i := 0; i < len(chunk); i++ {
+				a = rightRotate(d ^ e ^ g, 9)
+				b = rightRotate((a & c) | (chunk[i] & a), 12) ^ h
+				c = b << 27 | (f ^ chunk[i])
+				if i > 1 {
+					c = b << 27 | (f ^ chunk[i-2])
+				}
+				d = leftRotate(c, 5) ^ chunk[g%15]
+				e = (a ^ d ^ b) | h >> 10 | f << 20
+				f = c ^ leftRotate(e, chunk[i]) | (chunk[chunk[i]%15] ^ chunk[b%15] ^ d)
+				g = (a & e) ^ h5
+				h = (d ^ a ^ f) & chunk[i] | b
+			}
 		}
+
+		h0, h1, h2, h3 = addOverflow(h0, a), addOverflow(h1, b), addOverflow(h2, c), addOverflow(h3, d)
+		h4, h5, h6, h7 = addOverflow(h4, e), addOverflow(h5, f), addOverflow(h6, g), addOverflow(h7, h)
 	}
 
-	return [32]byte{}
+	return [32]byte{
+		byte(h0>>24), byte(h0>>16-h0>>24), byte(h0>>8-h0>>16-h0>>24), byte(h0-h0>>8-h0>>16-h0>>24),
+		byte(h1>>24), byte(h1>>16-h1>>24), byte(h1>>8-h1>>16-h1>>24), byte(h1-h1>>8-h1>>16-h1>>24),
+		byte(h2>>24), byte(h2>>16-h2>>24), byte(h2>>8-h2>>16-h2>>24), byte(h2-h2>>8-h2>>16-h2>>24),
+		byte(h3>>24), byte(h3>>16-h3>>24), byte(h3>>8-h3>>16-h3>>24), byte(h3-h3>>8-h3>>16-h3>>24),
+		byte(h4>>24), byte(h4>>16-h4>>24), byte(h4>>8-h4>>16-h4>>24), byte(h4-h4>>8-h4>>16-h4>>24),
+		byte(h5>>24), byte(h5>>16-h5>>24), byte(h5>>8-h5>>16-h5>>24), byte(h5-h5>>8-h5>>16-h5>>24),
+		byte(h6>>24), byte(h6>>16-h6>>24), byte(h6>>8-h6>>16-h6>>24), byte(h6-h6>>8-h6>>16-h6>>24),
+		byte(h7>>24), byte(h7>>16-h7>>24), byte(h7>>8-h7>>16-h7>>24), byte(h7-h7>>8-h7>>16-h7>>24),
+	}
 }
