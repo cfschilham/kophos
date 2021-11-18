@@ -1,32 +1,46 @@
 package blockchain
 
 import (
+	"bytes"
+	"encoding/gob"
+	"github.com/cfschilham/dullhash"
 	"github.com/cfschilham/kophos/tx"
-	"github.com/cfschilham/kophos/util"
 	"math/big"
 )
 
-var maxHash, _ = big.NewInt(0).SetString("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", 16)
+var maxHash = big.NewInt(0).SetBytes(dullhash.MaxSum[:])
 
 type Block struct {
-	Seq int
-	Time  int
+	Seq       uint
+	Time      uint64
 	Miner     uint
 	ChildHash [32]byte
-	Nonce     uint
-	Txs   []tx.Tx
+	Nonce     uint64
+	Txs       []tx.Tx
 }
 
-func (b Block) Hash() [32]byte {
-	return util.SHA256Sum(b)
+func (b Block) MustHash() [32]byte {
+	hash, err := b.Hash()
+	if err != nil {
+		panic("error while hashing block")
+	}
+	return hash
+}
+
+func (b Block) Hash() ([32]byte, error) {
+	buf := &bytes.Buffer{}
+	if err := gob.NewEncoder(buf).Encode(&b); err != nil {
+		return [32]byte{}, err
+	}
+	return dullhash.Sum(buf.Bytes()), nil
 }
 
 func (b Block) HashBigInt() *big.Int {
-	hash := b.Hash()
+	hash := b.MustHash()
 	return big.NewInt(0).SetBytes(hash[:])
 }
 
-func (b Block) IsValid(di uint) bool {
-	h, d := b.HashBigInt(), big.NewInt(0).SetUint64(uint64(di))
+func (b Block) IsValid(di uint64) bool {
+	h, d := b.HashBigInt(), big.NewInt(0).SetUint64(di)
 	return h.Cmp(d.Div(maxHash, d)) == -1
 }
