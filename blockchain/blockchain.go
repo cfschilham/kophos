@@ -19,6 +19,10 @@ type Block struct {
 	Txs       []tx.Tx
 }
 
+func (b Block) Bytes() []byte {
+	return []byte{}
+}
+
 func (b Block) MustHash() [32]byte {
 	hash, err := b.Hash()
 	if err != nil {
