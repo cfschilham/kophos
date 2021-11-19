@@ -50,7 +50,7 @@ func (tx *Tx) Bytes() []byte {
 	out = append(out, []byte(tx.Recipient)...)
 	// TODO: 32/64 bit?
 	amount := uint32(tx.Amount)
-	out = append(out, byte(amount>>24), byte(amount>>16 - amount>>24), byte(amount>>8 - amount>>16 - amount>>24), byte(amount - amount>>24 - amount>>16 - amount>>8))
+	out = append(out, byte(amount>>24), byte((amount>>16)&0xFF00), byte((amount>>8)&0xFF0000), byte(amount&0xFF000000))
 	out = append(out, tx.ChildHash[:]...)
 	return out
 }
