@@ -6,25 +6,26 @@ import (
 	"crypto/rsa"
 	"encoding/base32"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"github.com/cfschilham/dullhash"
-	"github.com/cfschilham/kophos/store"
-	"github.com/cfschilham/kophos/command"
+	"github.com/cfschilham/kophos/wallet"
 	"math/big"
 	"os"
 	"strconv"
-	"strings"
 )
 
-var CmdTx = command.Command{
-	Run: runTx,
-}
+type Status int
+const (
+	Valid Status = iota + 1
+	NotSigned
+	InsufficientBalance
+)
 
 type Header struct {
 	Sender    string
 	Recipient string
 	Amount    uint64
+	Seq		  uint64
 	ChildHash [32]byte
 }
 
@@ -34,6 +35,9 @@ type Tx struct {
 }
 
 func (tx *Tx) Sign(key *rsa.PrivateKey) (*Tx, error) {
+	if tx.Sig != nil {
+		return tx, fmt.Errorf("transaction already signed")
+	}
 	hash := tx.Hash()
 	sig, err := key.Sign(rand.Reader, hash[:], crypto.Hash(0))
 	if err != nil {
@@ -57,103 +61,51 @@ func (tx *Tx) Bytes() []byte {
 	return out
 }
 
-func (tx *Tx) Validate() bool {
+func (tx *Tx) Status(sender wallet.Wallet) Status {
 	hash := tx.Hash()
-	sender, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(tx.Sender)
+	s, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(tx.Sender)
 	if err != nil {
 		// TODO
 		panic(err)
 	}
 	err = rsa.VerifyPKCS1v15(&rsa.PublicKey{
-		N: big.NewInt(0).SetBytes(sender),
+		N: big.NewInt(0).SetBytes(s),
 		E: 65537,
 	}, 0, hash[:], tx.Sig)
-	return err == nil
+
+	if err != nil {
+		return NotSigned
+	}
+
+	if tx.Amount > sender.Balance {
+		return InsufficientBalance
+	}
+
+	return Valid
 }
 
-func create(sender, recip, amountStr string) {
+func Create(sender, recip, amountStr string, seq uint64, childHash [32]byte) *Tx {
 	amount, err := strconv.Atoi(amountStr)
 	if err != nil {
 		fmt.Printf("invalid amount\n")
 		os.Exit(1)
 	}
 
-	txs := []*Tx{}
-	if err = store.Load(&txs, "txs"); err != nil {
-		fmt.Printf("error while loading txs: %v\n", err)
-		os.Exit(1)
-	}
-	tx := &Tx{
+	return &Tx{
 		Header: Header{
 			Sender:    sender,
 			Recipient: recip,
 			Amount:    uint64(amount),
-			ChildHash: [32]byte{0},
+			Seq: seq,
+			ChildHash: childHash,
 		},
 	}
-	txs = append(txs, tx)
-	if err = store.Save(txs, "txs"); err != nil {
-		fmt.Printf("error while saving txs: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("transaction created with hash %x\n", tx.Hash())
-	os.Exit(0)
 }
 
-func list() {
-	txs := []*Tx{}
-	if err := store.Load(&txs, "txs"); err != nil {
-		fmt.Printf("error while loading txs: %v\n", err)
-		os.Exit(1)
+func (s Status) String() string {
+	seasons := [...]string{"valid", "invalid", "insufficient balance"}
+	if s < Valid || s > InsufficientBalance {
+		return fmt.Sprintf("Status(%d)", int(s))
 	}
-	for i, tx := range txs {
-		fmt.Printf("%03d: %064X\n", i, tx.Hash())
-	}
-	os.Exit(0)
-}
-
-func validate(id string) {
-	txs := []*Tx{}
-	if err := store.Load(&txs, "txs"); err != nil {
-		fmt.Printf("error while loading txs: %v\n", err)
-		os.Exit(1)
-	}
-	for _, tx := range txs {
-		hash := tx.Hash()
-		if hex.EncodeToString(hash[:]) == strings.ToLower(id) {
-			if tx.Validate() {
-				fmt.Printf("valid\n")
-			} else {
-				fmt.Printf("invalid\n")
-			}
-			os.Exit(0)
-		}
-	}
-	fmt.Printf("could not find transaction with the specified id\n")
-	os.Exit(1)
-}
-
-func runTx(args []string) {
-	if len(args) == 1 {
-		// Print help
-		os.Exit(0)
-	}
-	switch args[1] {
-	case "create":
-		if len(args) < 5 {
-			// Print help
-			os.Exit(0)
-		}
-		create(args[2], args[3], args[4])
-	case "list":
-		list()
-	case "validate":
-		if len(args) < 3 {
-			os.Exit(0)
-		}
-		validate(args[2])
-	default:
-		// Print help
-		os.Exit(0)
-	}
+	return seasons[s-1]
 }

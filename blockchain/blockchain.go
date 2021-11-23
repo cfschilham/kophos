@@ -19,8 +19,13 @@ type Block struct {
 	Txs       []tx.Tx
 }
 
-func (b Block) Bytes() []byte {
-	return []byte{}
+func (b Block) Bytes() ([]byte, error) {
+	buf := &bytes.Buffer{}
+	err := gob.NewEncoder(buf).Encode(&b)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (b Block) MustHash() [32]byte {
@@ -32,11 +37,11 @@ func (b Block) MustHash() [32]byte {
 }
 
 func (b Block) Hash() ([32]byte, error) {
-	buf := &bytes.Buffer{}
-	if err := gob.NewEncoder(buf).Encode(&b); err != nil {
+	buf, err := b.Bytes()
+	if err != nil {
 		return [32]byte{}, err
 	}
-	return dullhash.Sum(buf.Bytes()), nil
+	return dullhash.Sum(buf), nil
 }
 
 func (b Block) HashBigInt() *big.Int {

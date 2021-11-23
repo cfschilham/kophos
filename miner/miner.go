@@ -3,6 +3,9 @@ package miner
 import (
 	"github.com/cfschilham/kophos/blockchain"
 	"github.com/cfschilham/kophos/command"
+	"github.com/cfschilham/kophos/store"
+	"github.com/cfschilham/kophos/tx"
+	"github.com/cfschilham/kophos/wallet"
 	"github.com/sirupsen/logrus"
 	flag "github.com/spf13/pflag"
 	"math"
@@ -19,8 +22,11 @@ func runMine(args []string) {
 	flag.Uint64VarP(&diff, "difficulty", "d", 100000, "The blockchain mining difficulty")
 	flag.Parse()
 
-	var first = blockchain.Block{}
-	var chain = []blockchain.Block{first}
+	chain := store.Get().Blocks
+	if chain == nil {
+		first := blockchain.Block{}
+		chain = []blockchain.Block{first}
+	}
 
 	rand.Seed(int64(time.Now().Nanosecond()))
 
@@ -47,6 +53,7 @@ func runMine(args []string) {
 			Time:      uint64(time.Now().Unix()),
 			Nonce:     nonce,
 			ChildHash: cbHash,
+			Txs: []tx.Tx{},
 		}
 		numHashes++
 		if !b.IsValid(diff) {
@@ -56,7 +63,42 @@ func runMine(args []string) {
 			continue
 		}
 		logrus.Infof("found block with seq %v and nonce %v at time %v", b.Seq, b.Nonce, b.Time)
+		var txs []*tx.Tx
+		for _, t := range store.Get().Txs {
+			wallets := store.Get().Wallets
+			wi, err := wallet.Lookup(wallets, t.Sender)
+			if err != nil || wi == -1 {
+				logrus.Errorf("could not find sender wallet for transaction: %064X, transaction deleted",
+					t.Hash())
+				continue
+			}
+
+			switch t.Status(wallets[wi]) {
+			case tx.InsufficientBalance:
+				logrus.Infof("transaction removed because of insufficient balance: %064X", t.Hash())
+				continue
+			case tx.NotSigned:
+				txs = append(txs, t)
+				continue
+			default: // when transaction is valid
+				b.Txs = append(b.Txs, *t)
+				logrus.Infof("processed transaction: %064X", t.Hash())
+			}
+		}
+		err := store.Mutate(func(s *store.Store) {
+			s.Txs = txs
+		})
+		if err != nil {
+			logrus.Errorf("an error occured while writing pending transactions to store")
+		}
 		chain = append(chain, b)
+		err = store.Mutate(func(s *store.Store) {
+			s.Blocks = chain
+		})
+		if err != nil {
+			logrus.Errorf("an error occured while writing blockchain to store")
+		}
+
 		childBlock, cbHash = b, b.MustHash()
 		nonce = 0
 	}
