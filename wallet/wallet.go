@@ -7,18 +7,18 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"fmt"
-	"github.com/cfschilham/kophos/cache"
 	"github.com/cfschilham/kophos/command"
+	"github.com/cfschilham/kophos/store"
 	"github.com/cfschilham/kophos/tx"
+	"log"
 	"math/big"
 	"os"
+	"strings"
 )
 
 var CmdWallet = command.Command{
 	Run: runWallet,
 }
-
-
 
 type Wallet struct {
 	Key *rsa.PrivateKey
@@ -34,7 +34,7 @@ func New() (Wallet, error) {
 
 func create() {
 	ws := []Wallet{}
-	if err := cache.Load(&ws, "wallets"); err != nil {
+	if err := store.Load(&ws, "wallets"); err != nil {
 		fmt.Printf("error while loading wallets: %v\n", err)
 		os.Exit(1)
 	}
@@ -44,7 +44,7 @@ func create() {
 		os.Exit(1)
 	}
 	ws = append(ws, w)
-	if err = cache.Save(ws, "wallets"); err != nil {
+	if err = store.Save(ws, "wallets"); err != nil {
 		fmt.Printf("error while saving wallets: %v\n", err)
 		os.Exit(1)
 	}
@@ -58,7 +58,7 @@ func create() {
 
 func remove(id string) {
 	ws := []Wallet{}
-	if err := cache.Load(&ws, "wallets"); err != nil {
+	if err := store.Load(&ws, "wallets"); err != nil {
 		fmt.Printf("error while loading wallets: %v\n", err)
 		os.Exit(1)
 	}
@@ -79,7 +79,7 @@ func remove(id string) {
 	}
 	if input == "remove this wallet\n" {
 		ws = append(ws[:i], ws[i+1:]...)
-		if err = cache.Save(ws, "wallets"); err != nil {
+		if err = store.Save(ws, "wallets"); err != nil {
 			fmt.Printf("error while saving wallets: %v\n", err)
 			os.Exit(1)
 		}
@@ -92,13 +92,13 @@ func remove(id string) {
 
 func list() {
 	ws := []Wallet{}
-	if err := cache.Load(&ws, "wallets"); err != nil {
+	if err := store.Load(&ws, "wallets"); err != nil {
 		fmt.Printf("error while loading wallets: %v\n", err)
 		os.Exit(1)
 	}
 	for i, w := range ws {
 		fmt.Printf(
-			"%3d: %v\n",
+			"%03d: %v\n",
 			i,
 			base32.StdEncoding.WithPadding(base32.NoPadding).
 				EncodeToString(w.Key.PublicKey.N.Bytes()),
@@ -121,42 +121,30 @@ func lookup(ws []Wallet, id string) (int, error) {
 }
 
 func sign(txID, id string) {
-	txs := []*tx.Tx{}
-	if err := cache.Load(&txs, "txs"); err != nil {
-		fmt.Printf("error while loading txs: %v\n", err)
-		os.Exit(1)
-	}
-	ws := []Wallet{}
-	if err := cache.Load(&ws, "wallets"); err != nil {
-		fmt.Printf("error while loading wallets: %v\n", err)
-		os.Exit(1)
-	}
-	for _, t := range txs {
-		hash := t.Hash()
-		if hex.EncodeToString(hash[:]) == txID {
-			i, err := lookup(ws, id)
-			if err != nil {
-				fmt.Printf("%v\n", err)
-				os.Exit(1)
+	if err := store.Mutate(func(s store.Store) store.Store {
+		for _, t := range s.Txs {
+			hash := t.Hash()
+			if hex.EncodeToString(hash[:]) == strings.ToLower(txID) {
+				i, err := lookup(s.Wallets, id)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+				if i == -1 {
+					log.Fatalf("could not find wallet with the specified id")
+				}
+
+				if _, err = t.Sign(s.Wallets[i].Key); err != nil {
+					log.Fatalf("error while signing transaction: %v", err)
+				}
+				fmt.Printf("signed successfully\n")
+				return s
 			}
-			if i == -1 {
-				fmt.Printf("provided transaction id does not exist\n")
-				os.Exit(1)
-			}
-			if _, err = t.Sign(ws[i].Key); err != nil {
-				fmt.Printf("error while signing transaction: %v\n", err)
-				os.Exit(1)
-			}
-			if err = cache.Save(txs, "txs"); err != nil {
-				fmt.Printf("error while saving txs: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Printf("signed successfully\n")
-			os.Exit(0)
 		}
+		log.Fatalf("could not find transaction with the specified id")
+		return s
+	}); err != nil {
+		log.Fatalf("%v", err)
 	}
-	fmt.Printf("provided transaction id does not exist\n")
-	os.Exit(1)
 }
 
 func runWallet(args []string) {
@@ -171,7 +159,7 @@ func runWallet(args []string) {
 	case "list":
 		list()
 	case "remove":
-		if len(args) < 3{
+		if len(args) < 3 {
 			// Print help.
 			os.Exit(0)
 		}

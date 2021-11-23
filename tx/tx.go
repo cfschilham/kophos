@@ -5,14 +5,16 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base32"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"github.com/cfschilham/dullhash"
-	"github.com/cfschilham/kophos/cache"
+	"github.com/cfschilham/kophos/store"
 	"github.com/cfschilham/kophos/command"
 	"math/big"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var CmdTx = command.Command{
@@ -20,9 +22,9 @@ var CmdTx = command.Command{
 }
 
 type Header struct {
-	Sender     string
-	Recipient   string
-	Amount uint
+	Sender    string
+	Recipient string
+	Amount    uint64
 	ChildHash [32]byte
 }
 
@@ -33,7 +35,7 @@ type Tx struct {
 
 func (tx *Tx) Sign(key *rsa.PrivateKey) (*Tx, error) {
 	hash := tx.Hash()
-	sig, err := key.Sign(rand.Reader, hash[:], crypto.SHA256)
+	sig, err := key.Sign(rand.Reader, hash[:], crypto.Hash(0))
 	if err != nil {
 		return tx, err
 	}
@@ -48,9 +50,9 @@ func (tx *Tx) Hash() [32]byte {
 func (tx *Tx) Bytes() []byte {
 	out := []byte(tx.Sender)
 	out = append(out, []byte(tx.Recipient)...)
-	// TODO: 32/64 bit?
-	amount := uint32(tx.Amount)
-	out = append(out, byte(amount>>24), byte((amount>>16)&0xFF00), byte((amount>>8)&0xFF0000), byte(amount&0xFF000000))
+	amountbe := make([]byte, 8)
+	binary.BigEndian.PutUint64(amountbe, tx.Amount)
+	out = append(out, amountbe...)
 	out = append(out, tx.ChildHash[:]...)
 	return out
 }
@@ -65,7 +67,7 @@ func (tx *Tx) Validate() bool {
 	err = rsa.VerifyPKCS1v15(&rsa.PublicKey{
 		N: big.NewInt(0).SetBytes(sender),
 		E: 65537,
-	}, crypto.SHA256, hash[:], tx.Sig)
+	}, 0, hash[:], tx.Sig)
 	return err == nil
 }
 
@@ -77,7 +79,7 @@ func create(sender, recip, amountStr string) {
 	}
 
 	txs := []*Tx{}
-	if err = cache.Load(&txs, "txs"); err != nil {
+	if err = store.Load(&txs, "txs"); err != nil {
 		fmt.Printf("error while loading txs: %v\n", err)
 		os.Exit(1)
 	}
@@ -85,12 +87,12 @@ func create(sender, recip, amountStr string) {
 		Header: Header{
 			Sender:    sender,
 			Recipient: recip,
-			Amount:    uint(amount),
+			Amount:    uint64(amount),
 			ChildHash: [32]byte{0},
 		},
 	}
 	txs = append(txs, tx)
-	if err = cache.Save(txs, "txs"); err != nil {
+	if err = store.Save(txs, "txs"); err != nil {
 		fmt.Printf("error while saving txs: %v\n", err)
 		os.Exit(1)
 	}
@@ -100,25 +102,25 @@ func create(sender, recip, amountStr string) {
 
 func list() {
 	txs := []*Tx{}
-	if err := cache.Load(&txs, "txs"); err != nil {
+	if err := store.Load(&txs, "txs"); err != nil {
 		fmt.Printf("error while loading txs: %v\n", err)
 		os.Exit(1)
 	}
 	for i, tx := range txs {
-		fmt.Printf("%3d: %x\n", i, tx.Hash())
+		fmt.Printf("%03d: %064X\n", i, tx.Hash())
 	}
 	os.Exit(0)
 }
 
 func validate(id string) {
 	txs := []*Tx{}
-	if err := cache.Load(&txs, "txs"); err != nil {
+	if err := store.Load(&txs, "txs"); err != nil {
 		fmt.Printf("error while loading txs: %v\n", err)
 		os.Exit(1)
 	}
 	for _, tx := range txs {
 		hash := tx.Hash()
-		if hex.EncodeToString(hash[:]) == id {
+		if hex.EncodeToString(hash[:]) == strings.ToLower(id) {
 			if tx.Validate() {
 				fmt.Printf("valid\n")
 			} else {
@@ -127,6 +129,8 @@ func validate(id string) {
 			os.Exit(0)
 		}
 	}
+	fmt.Printf("could not find transaction with the specified id\n")
+	os.Exit(1)
 }
 
 func runTx(args []string) {
