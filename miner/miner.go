@@ -1,8 +1,10 @@
 package miner
 
 import (
+	"fmt"
 	"github.com/cfschilham/kophos/blockchain"
 	"github.com/cfschilham/kophos/command"
+	"github.com/cfschilham/kophos/models"
 	"github.com/cfschilham/kophos/store"
 	"github.com/cfschilham/kophos/tx"
 	"github.com/cfschilham/kophos/wallet"
@@ -18,6 +20,19 @@ var CmdMine = command.Command{
 }
 
 func runMine(args []string) {
+	if len(args) < 2 {
+		fmt.Printf("Usage:\n" +
+			"kophos miner <walletId> (use \"kophos wallet list\" to see wallets")
+	}
+
+	wallets := store.Get().Wallets
+	wi, err := wallet.Lookup(wallets, args[1])
+	if err != nil || wi == -1 {
+		logrus.Fatalf("could not find wallet with id: %s", args[1])
+	}
+
+	minerWallet := wallets[wi]
+
 	var diff uint64
 	flag.Uint64VarP(&diff, "difficulty", "d", 100000, "The blockchain mining difficulty")
 	flag.Parse()
@@ -30,7 +45,7 @@ func runMine(args []string) {
 
 	rand.Seed(int64(time.Now().Nanosecond()))
 
-	logrus.Infof("starting miner, difficulty: %v", diff)
+	logrus.Infof("starting miner, difficulty: %v, walletId: %s", diff, args[1])
 
 	startTime := time.Now()
 	numHashes := 0
@@ -53,7 +68,8 @@ func runMine(args []string) {
 			Time:      uint64(time.Now().Unix()),
 			Nonce:     nonce,
 			ChildHash: cbHash,
-			Txs: []tx.Tx{},
+			Miner: *minerWallet.Key.PublicKey.N,
+			Txs: []models.Tx{},
 		}
 		numHashes++
 		if !b.IsValid(diff) {
@@ -63,7 +79,7 @@ func runMine(args []string) {
 			continue
 		}
 		logrus.Infof("found block with seq %v and nonce %v at time %v", b.Seq, b.Nonce, b.Time)
-		var txs []*tx.Tx
+		var txs []*models.Tx
 		for _, t := range store.Get().Txs {
 			wallets := store.Get().Wallets
 			wi, err := wallet.Lookup(wallets, t.Sender)
@@ -73,17 +89,19 @@ func runMine(args []string) {
 				continue
 			}
 
-			switch t.Status(wallets[wi]) {
-			case tx.InsufficientBalance:
-				logrus.Infof("transaction removed because of insufficient balance: %064X", t.Hash())
-				continue
-			case tx.NotSigned:
+			switch tx.Status(*t, wallets[wi]) {
+			case models.Invalid:
 				txs = append(txs, t)
 				continue
 			default: // when transaction is valid
-				b.Txs = append(b.Txs, *t)
-				logrus.Infof("processed transaction: %064X", t.Hash())
+				logrus.Infof("processing transaction: %064X", t.Hash())
 			}
+			balance := wallet.GetWalletBalance(wallets[wi])
+			if balance < t.Amount {
+				logrus.Errorf("insufficient balance to process transaction, deleting..")
+				continue
+			}
+			b.Txs = append(b.Txs, *t)
 		}
 		err := store.Mutate(func(s *store.Store) {
 			s.Txs = txs

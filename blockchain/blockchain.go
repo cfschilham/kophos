@@ -4,19 +4,21 @@ import (
 	"bytes"
 	"encoding/gob"
 	"github.com/cfschilham/dullhash"
-	"github.com/cfschilham/kophos/tx"
+	"github.com/cfschilham/kophos/models"
 	"math/big"
 )
+
+const BlockReward uint64 = 10
 
 var maxHash = big.NewInt(0).SetBytes(dullhash.MaxSum[:])
 
 type Block struct {
 	Seq       uint
 	Time      uint64
-	Miner     uint
+	Miner     big.Int
 	ChildHash [32]byte
 	Nonce     uint64
-	Txs       []tx.Tx
+	Txs       []models.Tx
 }
 
 func (b Block) Bytes() ([]byte, error) {

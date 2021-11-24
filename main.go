@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"github.com/cfschilham/kophos/miner"
 	"github.com/cfschilham/kophos/store"
+	"github.com/cfschilham/kophos/tx"
+	"github.com/cfschilham/kophos/wallet"
 	"log"
 	"os"
 )
@@ -17,17 +19,20 @@ func main() {
 			"	kophos store erase - To erase all data")
 		os.Exit(0)
 	}
-	// Initialize store
-	if err := store.Init(); err != nil {
-		log.Fatalf("error while loading data: %v", err)
+	// Initialize store if were not trying to erase it
+	if os.Args[1] != "store" {
+		if err := store.Init(); err != nil {
+			log.Fatalf("error while loading data: %v", err)
+		}
 	}
+
 	switch os.Args[1] {
 	case "miner":
 		miner.CmdMine.Run(os.Args[1:])
 	case "wallet":
-		store.CmdWallet.Run(os.Args[1:])
+		wallet.CmdWallet.Run(os.Args[1:])
 	case "tx":
-		store.CmdTx.Run(os.Args[1:])
+		tx.CmdTx.Run(os.Args[1:])
 	case "store":
 		store.CmdStore.Run(os.Args[1:])
 	default:
