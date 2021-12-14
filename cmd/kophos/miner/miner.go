@@ -3,11 +3,12 @@ package miner
 import (
 	"fmt"
 	"github.com/cfschilham/kophos/blockchain"
-	"github.com/cfschilham/kophos/command"
+	tx2 "github.com/cfschilham/kophos/blockchain/tx"
+	"github.com/cfschilham/kophos/cmd/kophos/base"
+	"github.com/cfschilham/kophos/cmd/kophos/store"
+	"github.com/cfschilham/kophos/cmd/kophos/tx"
+	"github.com/cfschilham/kophos/cmd/kophos/wallet"
 	"github.com/cfschilham/kophos/models"
-	"github.com/cfschilham/kophos/store"
-	"github.com/cfschilham/kophos/tx"
-	"github.com/cfschilham/kophos/wallet"
 	"github.com/sirupsen/logrus"
 	flag "github.com/spf13/pflag"
 	"math"
@@ -15,7 +16,7 @@ import (
 	"time"
 )
 
-var CmdMine = command.Command{
+var CmdMine = base.Command{
 	Run: runMine,
 }
 
@@ -26,7 +27,7 @@ func runMine(args []string) {
 	}
 
 	wallets := store.Get().Wallets
-	wi, err := wallet.Lookup(wallets, args[1])
+	wi, err := wallet.lookup(wallets, args[1])
 	if err != nil || wi == -1 {
 		logrus.Fatalf("could not find wallet with id: %s", args[1])
 	}
@@ -68,8 +69,8 @@ func runMine(args []string) {
 			Time:      uint64(time.Now().Unix()),
 			Nonce:     nonce,
 			ChildHash: cbHash,
-			Miner: *minerWallet.Key.PublicKey.N,
-			Txs: []models.Tx{},
+			Miner:     *minerWallet.Key.PublicKey.N,
+			Txs:       []tx2.Tx{},
 		}
 		numHashes++
 		if !b.IsValid(diff) {
@@ -79,10 +80,10 @@ func runMine(args []string) {
 			continue
 		}
 		logrus.Infof("found block with seq %v and nonce %v at time %v", b.Seq, b.Nonce, b.Time)
-		var txs []*models.Tx
+		var txs []*tx2.Tx
 		for _, t := range store.Get().Txs {
 			wallets := store.Get().Wallets
-			wi, err := wallet.Lookup(wallets, t.Sender)
+			wi, err := wallet.lookup(wallets, t.Sender)
 			if err != nil || wi == -1 {
 				logrus.Errorf("could not find sender wallet for transaction: %064X, transaction deleted",
 					t.Hash())

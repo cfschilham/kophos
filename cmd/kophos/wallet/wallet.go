@@ -2,49 +2,39 @@ package wallet
 
 import (
 	"bufio"
-	"crypto/rand"
-	"crypto/rsa"
 	"encoding/base32"
 	"encoding/hex"
 	"fmt"
 	"github.com/cfschilham/kophos/blockchain"
-	"github.com/cfschilham/kophos/command"
-	"github.com/cfschilham/kophos/models"
+	"github.com/cfschilham/kophos/blockchain/wallet"
+	"github.com/cfschilham/kophos/cmd/kophos/base"
+	"github.com/cfschilham/kophos/cmd/kophos/tx"
 	"github.com/cfschilham/kophos/store"
-	"github.com/cfschilham/kophos/tx"
 	"log"
 	"math/big"
 	"os"
 	"strings"
 )
 
-var CmdWallet = command.Command{
-	Run: runWallet,
+var CmdWallet = base.Command{
+	Run: run,
 }
 
-func New() (models.Wallet, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 512)
-	if err != nil {
-		return models.Wallet{}, fmt.Errorf("error while generating keypair: %v", err)
-	}
-	return models.Wallet{Key: key}, nil
-}
-
-func Lookup(ws []models.Wallet, id string) (int, error) {
+func lookup(ws []wallet.Wallet, id string) int {
 	n, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(id)
 	if err != nil {
-		return 0, fmt.Errorf("error while decoding wallet id: %v", err)
+		return -1
 	}
 	for i, w := range ws {
 		if big.NewInt(0).SetBytes(n).Cmp(w.Key.PublicKey.N) == 0 {
-			return i, nil
+			return i
 		}
 	}
-	return -1, nil
+	return -1
 }
 
-func createWallet() {
-	w, err := New()
+func create() {
+	w, err := wallet.New()
 	if err != nil {
 		log.Fatalf("error while creating wallet: %v\n", err)
 	}
@@ -58,14 +48,10 @@ func createWallet() {
 	)
 }
 
-func removeWallet(id string) {
+func remove(id string) {
 	ws := store.Get().Wallets
 
-	i, err := Lookup(ws, id)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		os.Exit(1)
-	}
+	i := lookup(ws, id)
 	if i == -1 {
 		fmt.Printf("could not find a wallet with the provided id")
 		os.Exit(1)
@@ -89,7 +75,7 @@ func removeWallet(id string) {
 	}
 }
 
-func listWallets() {
+func list() {
 	ws := store.Get().Wallets
 	for i, w := range ws {
 		fmt.Printf(
@@ -102,39 +88,39 @@ func listWallets() {
 	os.Exit(0)
 }
 
-func GetWalletBalance(wallet models.Wallet) uint64 {
-	var bal uint64 = 0
-	for _, block := range store.Get().Blocks {
-		if block.Miner.Cmp(wallet.Key.PublicKey.N) == 0 {
-			bal += blockchain.BlockReward
-		}
-	}
-	walledIdStr := base32.StdEncoding.WithPadding(base32.NoPadding).
-		EncodeToString(wallet.Key.PublicKey.N.Bytes())
-	for _, t := range tx.GetProcessed() {
-		if t.Sender == walledIdStr {
-			bal -= t.Amount
-		}
-		if t.Recipient == walledIdStr {
-			bal += t.Amount
-		}
-	}
-	return bal
-}
-
-
-func checkBalance(id string) {
-	ws := store.Get().Wallets
-	i, err := Lookup(ws, id)
-	if err != nil {
-		log.Fatalf("error while trying to find wallet: %v", err)
-	}
-	if i == -1 {
-		log.Fatalf("could not find wallet with the specified id")
-	}
-
-	fmt.Printf("wallet balance for wallet %s: %d", id, GetWalletBalance(ws[i]))
-}
+//func GetWalletBalance(wallet wallet.Wallet) uint64 {
+//	var bal uint64 = 0
+//	for _, block := range store.Get().Blocks {
+//		if block.Miner.Cmp(wallet.Key.PublicKey.N) == 0 {
+//			bal += blockchain.BlockReward
+//		}
+//	}
+//	walledIdStr := base32.StdEncoding.WithPadding(base32.NoPadding).
+//		EncodeToString(wallet.Key.PublicKey.N.Bytes())
+//	for _, t := range tx.GetProcessed() {
+//		if t.Sender == walledIdStr {
+//			bal -= t.Amount
+//		}
+//		if t.Recipient == walledIdStr {
+//			bal += t.Amount
+//		}
+//	}
+//	return bal
+//}
+//
+//
+//func checkBalance(id string) {
+//	ws := store.Get().Wallets
+//	i, err := lookup(ws, id)
+//	if err != nil {
+//		log.Fatalf("error while trying to find wallet: %v", err)
+//	}
+//	if i == -1 {
+//		log.Fatalf("could not find wallet with the specified id")
+//	}
+//
+//	fmt.Printf("wallet balance for wallet %s: %d", id, GetWalletBalance(ws[i]))
+//}
 
 func sign(txID, id string) {
 	if err := store.Mutate(func(s *store.Store) {
@@ -143,7 +129,7 @@ func sign(txID, id string) {
 		for _, t := range s.Txs {
 			hash := t.Hash()
 			if hex.EncodeToString(hash[:]) == strings.ToLower(txID) {
-				i, err := Lookup(s.Wallets, id)
+				i, err := lookup(s.Wallets, id)
 				if err != nil {
 					log.Fatalf("%v", err)
 				}
@@ -166,8 +152,7 @@ func sign(txID, id string) {
 	}
 }
 
-
-func runWallet(args []string) {
+func run(args []string) {
 	if len(args) == 1 {
 		fmt.Print("Usage:\n" +
 			"	kophos wallet create - Create a new wallet\n" +
@@ -180,16 +165,16 @@ func runWallet(args []string) {
 
 	switch args[1] {
 	case "create":
-		createWallet()
+		create()
 	case "list":
-		listWallets()
+		list()
 	case "remove":
 		if len(args) < 3 {
 			fmt.Print("Usage:\n" +
 				"	kophos wallet remove <walletId> (use \"kophos wallet list\" to see wallets)")
 			os.Exit(0)
 		}
-		removeWallet(args[2])
+		remove(args[2])
 	case "sign":
 		if len(args) < 4 {
 			fmt.Print("Usage:\n" +

@@ -4,27 +4,22 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/cfschilham/kophos/blockchain"
-	"github.com/cfschilham/kophos/command"
-	"github.com/cfschilham/kophos/models"
-	"log"
+	"github.com/cfschilham/kophos/blockchain/tx"
+	"github.com/cfschilham/kophos/blockchain/wallet"
 	"os"
 	"path/filepath"
 	"sync"
 )
 
-var CmdStore = command.Command{
-	Run: runStore,
-}
-
 type Store struct {
-	Txs []*models.Tx
-	Wallets []models.Wallet
-	Blocks []blockchain.Block
+	Txs        []*tx.Tx
+	Wallets    []wallet.Wallet
+	Blockchain blockchain.Blockchain
 }
 
 var (
-	store Store
-	mut *sync.Mutex
+	store   Store
+	mut     *sync.Mutex
 	dataDir string
 )
 
@@ -40,6 +35,9 @@ func Init() error {
 	return err
 }
 
+// Set overwrites the store to the provided store. Should only be used if it
+// doesn't depend on data from the store itself. In that case, use Mutate
+// instead.
 func Set(s Store) error {
 	mut.Lock()
 	defer mut.Unlock()
@@ -47,12 +45,15 @@ func Set(s Store) error {
 	return save(store)
 }
 
+// Get returns the current store.
 func Get() Store {
 	mut.Lock()
 	defer mut.Unlock()
 	return store
 }
 
+// Mutate runs function m on the store to change data in the store based on data
+// already in the store. Concurrency safe.
 func Mutate(m func(s *Store)) error {
 	mut.Lock()
 	defer mut.Unlock()
@@ -105,29 +106,4 @@ func load() (Store, error) {
 		return Store{}, fmt.Errorf("error while decoding data file: %v", err)
 	}
 	return s, nil
-}
-
-
-func runStore(args []string) {
-	if len(args) == 1 {
-		fmt.Print("Usage:\n" +
-			"	kophos store erase - Erase all kophos data")
-		os.Exit(0)
-	}
-	switch args[1] {
-	case "erase":
-		dataDir, err := constructDataDirPath()
-		if err != nil {
-			log.Fatalf("an error occured while trying to construct data path: %v", err)
-		}
-		err = os.RemoveAll(dataDir)
-		if err != nil {
-			log.Fatalf("error while try to delete store: %v", err)
-		}
-		fmt.Printf("store succesfully erased")
-	default:
-		fmt.Print("Usage:\n" +
-			"	kophos store erase - Erase all kophos data")
-		os.Exit(0)
-	}
 }
