@@ -17,7 +17,8 @@ type Block struct {
 	Time      uint64
 	Miner     big.Int
 	ChildHash [32]byte
-	Nonce     uint64
+	Nonce     int64
+	Factors   []int64
 	Txs       []models.Tx
 }
 
@@ -51,7 +52,10 @@ func (b Block) HashBigInt() *big.Int {
 	return big.NewInt(0).SetBytes(hash[:])
 }
 
-func (b Block) IsValid(di uint64) bool {
-	h, d := b.HashBigInt(), big.NewInt(0).SetUint64(di)
-	return h.Cmp(d.Div(maxHash, d)) == -1
+func (b Block) IsValid(di int64, childBlock *Block) bool {
+	num := b.Factors[0] * b.Factors[1]
+	for _, factor := range b.Factors[2:] {
+		num *= factor
+	}
+	return num == b.Nonce && num > di && num > childBlock.Nonce
 }

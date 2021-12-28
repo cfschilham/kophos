@@ -5,12 +5,14 @@ import (
 	"github.com/cfschilham/kophos/blockchain"
 	"github.com/cfschilham/kophos/command"
 	"github.com/cfschilham/kophos/models"
+	"github.com/cfschilham/kophos/quadratic-sieve"
 	"github.com/cfschilham/kophos/store"
 	"github.com/cfschilham/kophos/tx"
 	"github.com/cfschilham/kophos/wallet"
 	"github.com/sirupsen/logrus"
 	flag "github.com/spf13/pflag"
 	"math"
+	"math/big"
 	"math/rand"
 	"time"
 )
@@ -23,6 +25,7 @@ func runMine(args []string) {
 	if len(args) < 2 {
 		fmt.Printf("Usage:\n" +
 			"kophos miner <walletId> (use \"kophos wallet list\" to see wallets")
+		return
 	}
 
 	wallets := store.Get().Wallets
@@ -34,7 +37,8 @@ func runMine(args []string) {
 	minerWallet := wallets[wi]
 
 	var diff uint64
-	flag.Uint64VarP(&diff, "difficulty", "d", 100000, "The blockchain mining difficulty")
+	// 100 quadrillion
+	flag.Uint64VarP(&diff, "difficulty", "d", 100000000000000000, "The blockchain mining difficulty")
 	flag.Parse()
 
 	chain := store.Get().Blocks
@@ -45,40 +49,53 @@ func runMine(args []string) {
 
 	rand.Seed(int64(time.Now().Nanosecond()))
 
-	logrus.Infof("starting miner, difficulty: %v, walletId: %s", diff, args[1])
+	logrus.Infof("starting miner difficulty: %v,  walletId: %s", diff, args[1])
 
 	startTime := time.Now()
-	numHashes := 0
+	numFactors := 0
+	blockCount := 0
 	go func() {
 		for {
 			t := time.Tick(time.Second * 10)
 			<-t
 			logrus.Infof(
-				"avg. blocks/min: %.2f, %.2f MH/s",
-				float64(len(chain)-1)/time.Now().Sub(startTime).Minutes(),
-				(float64(numHashes)/time.Now().Sub(startTime).Seconds())/1000000,
+				"avg. blocks/min: %.2f, %.2f MF/s",
+				float64(blockCount)/time.Now().Sub(startTime).Minutes(),
+				(float64(numFactors) / time.Now().Sub(startTime).Seconds()),
 			)
 		}
 	}()
 	childBlock := chain[len(chain)-1]
 	cbHash := childBlock.MustHash()
-	for nonce := uint64(0); true; nonce++ {
+	start := int64(diff)
+	if len(chain) != 1 {
+		start = childBlock.Nonce + 1
+	}
+	for nonce := start; true; nonce++ {
+		n := big.NewInt(nonce)
+
+		f1, f2 := quadratic_sieve.Factorize(n)
+		if f1 == nil || f2 == nil {
+			continue
+		}
+		//fmt.Printf("%d x %d = %d", f1, f2, f1.Int64()*f2.Int64())
 		b := blockchain.Block{
 			Seq:       childBlock.Seq + 1,
 			Time:      uint64(time.Now().Unix()),
 			Nonce:     nonce,
+			Factors:   []int64{f1.Int64(), f2.Int64()},
 			ChildHash: cbHash,
-			Miner: *minerWallet.Key.PublicKey.N,
-			Txs: []models.Tx{},
+			Miner:     *minerWallet.Key.PublicKey.N,
+			Txs:       []models.Tx{},
 		}
-		numHashes++
-		if !b.IsValid(diff) {
+		if !b.IsValid(int64(diff), &childBlock) {
 			if nonce == math.MaxInt {
 				nonce = 0
 			}
 			continue
 		}
-		logrus.Infof("found block with seq %v and nonce %v at time %v", b.Seq, b.Nonce, b.Time)
+		logrus.Infof("found block with seq %v and nonce %d with factors %v at time %v", b.Seq, b.Nonce, b.Factors, time.Unix(int64(b.Time), 0))
+		blockCount++
 		var txs []*models.Tx
 		for _, t := range store.Get().Txs {
 			wallets := store.Get().Wallets
@@ -118,6 +135,5 @@ func runMine(args []string) {
 		}
 
 		childBlock, cbHash = b, b.MustHash()
-		nonce = 0
 	}
 }
